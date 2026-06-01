@@ -20,12 +20,17 @@ gemini = genai.GenerativeModel('gemini-1.5-flash')
 
 # --- Google Docs setup ---
 DOC_ID = os.environ['GOOGLE_DOC_ID']
-creds_info = json.loads(os.environ['GOOGLE_CREDS_JSON'])
-creds = service_account.Credentials.from_service_account_info(
-    creds_info,
-    scopes=['https://www.googleapis.com/auth/documents']
-)
-docs_service = build('docs', 'v1', credentials=creds)
+try:
+    creds_info = json.loads(os.environ['GOOGLE_CREDS_JSON'])
+    creds = service_account.Credentials.from_service_account_info(
+        creds_info,
+        scopes=['https://www.googleapis.com/auth/documents']
+    )
+    docs_service = build('docs', 'v1', credentials=creds)
+    print("Google Docs connected successfully")
+except Exception as e:
+    print(f"WARNING: Google Docs setup failed: {e}")
+    docs_service = None
 
 
 def format_trip_with_gemini(raw_text):
@@ -56,8 +61,11 @@ Trip message:
     return response.text
 
 
-def update_google_doc(formatted_text, original_text):
+def update_google_doc(formatted_text):
     """Overwrite the Google Doc with the newly formatted trip plan."""
+    if not docs_service:
+        raise Exception("Google Docs not configured correctly")
+
     doc = docs_service.documents().get(documentId=DOC_ID).execute()
     content = doc.get('body', {}).get('content', [])
     end_index = content[-1].get('endIndex', 1) - 1 if content else 1
@@ -85,6 +93,11 @@ def update_google_doc(formatted_text, original_text):
         documentId=DOC_ID,
         body={'requests': requests}
     ).execute()
+
+
+@app.route("/")
+def health():
+    return "Bot is running!", 200
 
 
 @app.route("/webhook", methods=['POST'])
@@ -125,11 +138,10 @@ def handle_message(event):
 
     try:
         formatted = format_trip_with_gemini(trip_text)
-        update_google_doc(formatted, trip_text)
+        update_google_doc(formatted)
 
         doc_link = f"https://docs.google.com/document/d/{DOC_ID}/edit"
 
-        # Determine if this is a group or 1-on-1 chat
         source = event.source
         if hasattr(source, 'group_id'):
             target_id = source.group_id
@@ -146,7 +158,6 @@ def handle_message(event):
         )
 
     except Exception as e:
-        # Determine target for error message
         source = event.source
         if hasattr(source, 'group_id'):
             target_id = source.group_id
