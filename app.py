@@ -4,7 +4,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import google.generativeai as genai
+from google import genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -14,9 +14,8 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.environ['LINE_CHANNEL_ACCESS_TOKEN'])
 handler = WebhookHandler(os.environ['LINE_CHANNEL_SECRET'])
 
-# --- Gemini setup ---
-genai.configure(api_key=os.environ['GEMINI_API_KEY'])
-gemini = genai.GenerativeModel('gemini-1.5-flash')
+# --- Gemini setup (new SDK - supports both AIza and AQ keys) ---
+gemini_client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
 
 # --- Google Docs setup ---
 DOC_ID = os.environ['GOOGLE_DOC_ID']
@@ -57,7 +56,10 @@ Rules:
 Trip message:
 {raw_text}"""
 
-    response = gemini.generate_content(prompt)
+    response = gemini_client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt
+    )
     return response.text
 
 
@@ -72,7 +74,6 @@ def update_google_doc(formatted_text):
 
     requests = []
 
-    # Clear existing content (if any)
     if end_index > 1:
         requests.append({
             'deleteContentRange': {
@@ -80,7 +81,6 @@ def update_google_doc(formatted_text):
             }
         })
 
-    # Write new content
     full_text = f"Trip Plan (Last updated via LINE)\n{'='*40}\n\n{formatted_text}"
     requests.append({
         'insertText': {
@@ -115,7 +115,6 @@ def webhook():
 def handle_message(event):
     text = event.message.text.strip()
 
-    # Only respond to messages starting with !trip
     if not text.lower().startswith("!trip"):
         return
 
@@ -130,7 +129,6 @@ def handle_message(event):
         )
         return
 
-    # Let the group know we're working on it
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text="✈️ Formatting trip plan, please wait...")
