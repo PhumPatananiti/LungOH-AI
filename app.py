@@ -34,39 +34,48 @@ except Exception as e:
 
 def format_trip_with_gemini(raw_text):
     """Send raw trip text to Gemini and get a formatted version back."""
-    prompt = f"""You are a helpful travel assistant. 
-Format the following trip plan into a clean, easy-to-read document.
+    prompt = f"""คุณคือผู้ช่วยวางแผนการเดินทางที่แสนดี
+ช่วยจัดรูปแบบแผนการเดินทางต่อไปนี้ให้เป็นระเบียบ อ่านง่าย และสวยงาม
 
-Use these sections (only include sections that have relevant info):
-- 🗺️ Destination
-- 📅 Dates
-- 🚌 Transport
-- 🏨 Accommodation
-- 📋 Day-by-Day Itinerary
-- 💰 Budget (if mentioned)
-- 📝 Notes / Other Details
+ใช้หัวข้อเหล่านี้ (เลือกใช้เฉพาะหัวข้อที่มีข้อมูล):
+- 🗺️ จุดหมายปลายทาง
+- 📅 วันที่เดินทาง
+- 🚌 การเดินทาง
+- 🏨 ที่พัก
+- 📋 แผนการเดินทางรายวัน
+- 💰 งบประมาณ (ถ้ามีระบุ)
+- 📝 หมายเหตุ / รายละเอียดเพิ่มเติม
 
-Rules:
-- Keep ALL original details, do not remove anything
-- Use bullet points inside each section
-- Be concise but clear
-- If the message is in Thai, keep the output in Thai
-- If mixed Thai/English, that's fine too
+กฎในการจัดรูปแบบ:
+- เก็บรายละเอียดเดิมไว้ทั้งหมด ห้ามตัดข้อมูลทิ้ง
+- ใช้ bullet points ในแต่ละหัวข้อ
+- เขียนให้กระชับแต่ชัดเจน
+- ให้ผลลัพธ์เป็นภาษาไทยเสมอ
 
-Trip message:
+ข้อมูลทริป:
 {raw_text}"""
 
-    response = gemini_client.models.generate_content(
-        model="gemini-1.5-flash",
-        contents=prompt
-    )
-    return response.text
+    model_name = "gemini-1.5-flash-8b"
+    try:
+        response = gemini_client.models.generate_content(
+            model=model_name,
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        # If it fails, try to list what is actually available for this key
+        try:
+            available = [m.name for m in gemini_client.models.list()]
+            diag = f"\nโมเดลที่ใช้งานได้: {', '.join(available)}"
+        except:
+            diag = ""
+        raise Exception(f"{str(e)}{diag}")
 
 
 def update_google_doc(formatted_text):
     """Overwrite the Google Doc with the newly formatted trip plan."""
     if not docs_service:
-        raise Exception("Google Docs not configured correctly")
+        raise Exception("Google Docs ไม่ได้รับการตั้งค่าอย่างถูกต้อง")
 
     doc = docs_service.documents().get(documentId=DOC_ID).execute()
     content = doc.get('body', {}).get('content', [])
@@ -81,7 +90,7 @@ def update_google_doc(formatted_text):
             }
         })
 
-    full_text = f"Trip Plan (Last updated via LINE)\n{'='*40}\n\n{formatted_text}"
+    full_text = f"แผนการเดินทาง (อัปเดตล่าสุดผ่าน LINE)\n{'='*40}\n\n{formatted_text}"
     requests.append({
         'insertText': {
             'location': {'index': 1},
@@ -124,14 +133,14 @@ def handle_message(event):
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(
-                text="❓ Please add trip details after !trip\n\nExample:\n!trip Chiang Mai 3 days July 10-12, taking bus, staying at Nimman House..."
+                text="❓ กรุณาใส่รายละเอียดทริปหลังคำสั่ง !trip\n\nตัวอย่าง:\n!trip เชียงใหม่ 3 วัน 10-12 กรกฎาคม นั่งรถทัวร์ พักที่นิมมาน..."
             )
         )
         return
 
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text="✈️ Formatting trip plan, please wait...")
+        TextSendMessage(text="✈️ กำลังจัดรูปแบบแผนการเดินทาง กรุณารอสักครู่...")
     )
 
     try:
@@ -151,7 +160,7 @@ def handle_message(event):
         line_bot_api.push_message(
             target_id,
             TextSendMessage(
-                text=f"✅ Trip plan is ready!\n\n📄 View here:\n{doc_link}\n\n(Send !trip again anytime to update)"
+                text=f"✅ แผนการเดินทางของคุณพร้อมแล้ว!\n\n📄 ดูได้ที่นี่:\n{doc_link}\n\n(ส่ง !trip มาใหม่ได้ตลอดเวลาเพื่ออัปเดต)"
             )
         )
 
@@ -166,7 +175,7 @@ def handle_message(event):
 
         line_bot_api.push_message(
             target_id,
-            TextSendMessage(text=f"❌ Something went wrong. Please try again.\n\nError: {str(e)}")
+            TextSendMessage(text=f"❌ เกิดข้อผิดพลาดบางอย่าง กรุณาลองใหม่อีกครั้ง\n\nรายละเอียด: {str(e)}")
         )
 
 
