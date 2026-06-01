@@ -55,7 +55,7 @@ def format_trip_with_gemini(raw_text):
 ข้อมูลทริป:
 {raw_text}"""
 
-    model_name = "gemini-1.5-flash-8b"
+    model_name = "gemini-2.0-flash-lite"
     try:
         response = gemini_client.models.generate_content(
             model=model_name,
