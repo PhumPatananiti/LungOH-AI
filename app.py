@@ -32,45 +32,64 @@ except Exception as e:
     docs_service = None
 
 
-def format_trip_with_gemini(raw_text):
-    """Send raw trip text to Gemini and get a formatted version back."""
-    prompt = f"""คุณคือผู้ช่วยวางแผนการเดินทางที่แสนดี
-ช่วยจัดรูปแบบแผนการเดินทางต่อไปนี้ให้เป็นระเบียบ อ่านง่าย และสวยงาม
+def get_current_doc_content():
+    """Read all text from the Google Doc."""
+    if not docs_service:
+        return ""
+    try:
+        doc = docs_service.documents().get(documentId=DOC_ID).execute()
+        content = doc.get('body', {}).get('content', [])
+        text = ""
+        for element in content:
+            if 'paragraph' in element:
+                for run in element.get('paragraph').get('elements'):
+                    text += run.get('textRun', {}).get('content', '')
+        return text
+    except Exception as e:
+        print(f"Error reading doc: {e}")
+        return ""
 
-ใช้หัวข้อเหล่านี้ (เลือกใช้เฉพาะหัวข้อที่มีข้อมูล):
-- 🗺️ จุดหมายปลายทาง
-- 📅 วันที่เดินทาง
-- 🚌 การเดินทาง
-- 🏨 ที่พัก
-- 📋 แผนการเดินทางรายวัน
-- 💰 งบประมาณ (ถ้ามีระบุ)
-- 📝 หมายเหตุ / รายละเอียดเพิ่มเติม
 
-กฎในการจัดรูปแบบ:
-- เก็บรายละเอียดเดิมไว้ทั้งหมด ห้ามตัดข้อมูลทิ้ง
-- ใช้ bullet points ในแต่ละหัวข้อ
-- เขียนให้กระชับแต่ชัดเจน
-- ให้ผลลัพธ์เป็นภาษาไทยเสมอ
+def format_trip_with_gemini(new_input, current_content):
+    """Smart merge new trip info into the existing document content with clear separation."""
+    prompt = f"""คุณคือผู้เชี่ยวชาญการจัดหน้าเอกสารและบรรณาธิการแผนการเดินทาง
+หน้าที่ของคุณคืออัปเดต "ข้อมูลทริปใหม่" ลงใน "เอกสารปัจจุบัน" โดยต้องเน้นความเป็นระเบียบและสวยงามสูงสุด
 
-ข้อมูลทริป:
-{raw_text}"""
+เอกสารปัจจุบัน:
+---
+{current_content if current_content else "(เอกสารว่างเปล่า)"}
+---
 
-    # ใช้โมเดลมาตรฐานฟรีในปี 2026
+ข้อมูลใหม่ที่ต้องจัดการ:
+"{new_input}"
+
+กฎเหล็กในการจัดรูปแบบเอกสาร:
+1. การแยกทริป: ต้องใช้เส้นคั่นทริปที่ชัดเจน เช่น "========================================" ระหว่างแต่ละทริป
+2. หัวข้อทริป: ใช้ตัวหนาและมี Emoji นำหน้า (เช่น 📍 ทริป: [ชื่อทริป]) ให้เห็นเด่นชัด
+3. โครงสร้างภายใน: จัดแบ่งเป็นหัวข้อ 🗺️ จุดหมาย, 📅 วันที่, 📋 รายละเอียด/แผนงาน โดยใช้ Bullet points
+4. การอัปเดต:
+   - ถ้าเป็นทริปที่มีอยู่แล้ว: ให้ปรับปรุงข้อมูลในส่วนเดิมให้สมบูรณ์ขึ้น ห้ามสร้างส่วนซ้ำ
+   - ถ้าเป็นทริปใหม่: ให้เพิ่มต่อท้ายไฟล์ โดยต้องใส่เส้นคั่นแยกจากทริปก่อนหน้าให้ชัดเจน
+5. ความสะอาด: ห้ามมีข้อความคุยกับผู้ใช้ ให้ส่งเฉพาะ "เนื้อหาทั้งหมดของเอกสาร" ที่จัดรูปแบบแล้วเท่านั้น
+6. ภาษา: ใช้ภาษาไทยที่สุภาพและอ่านง่าย
+
+ห้ามลบข้อมูลทริปอื่นๆ ที่มีอยู่แล้วเด็ดขาด!"""
+
     model_name = "gemini-3.1-flash-lite"
     try:
         response = gemini_client.models.generate_content(
             model=model_name,
             contents=prompt
         )
-        return response.text, True  # True means formatted by AI
+        return response.text, True
     except Exception as e:
-        # หาก AI ล้มเหลว ให้คืนค่าข้อความดิบกลับไป (Manual Mode)
         print(f"AI Error: {e}")
-        return raw_text, False  # False means raw text fallback
+        fallback_text = f"{current_content}\n\n[อัปเดตข้อมูลดิบ]\n{new_input}"
+        return fallback_text, False
 
 
-def update_google_doc(text, is_ai_formatted):
-    """Overwrite the Google Doc with either formatted or raw text."""
+def update_google_doc(full_text):
+    """Completely overwrite the Google Doc with the new merged content."""
     if not docs_service:
         raise Exception("Google Docs ไม่ได้รับการตั้งค่าอย่างถูกต้อง")
 
@@ -80,6 +99,7 @@ def update_google_doc(text, is_ai_formatted):
 
     requests = []
 
+    # Clear current content
     if end_index > 1:
         requests.append({
             'deleteContentRange': {
@@ -87,9 +107,7 @@ def update_google_doc(text, is_ai_formatted):
             }
         })
 
-    status_tag = "(จัดรูปแบบโดย AI)" if is_ai_formatted else "(บันทึกข้อมูลดิบ - AI ไม่ว่าง)"
-    full_text = f"แผนการเดินทาง {status_tag}\n{'='*40}\n\n{text}"
-    
+    # Insert new merged content
     requests.append({
         'insertText': {
             'location': {'index': 1},
@@ -126,31 +144,37 @@ def handle_message(event):
     if not text.lower().startswith("!trip"):
         return
 
-    trip_text = text[5:].strip()
+    trip_input = text[5:].strip()
 
-    if not trip_text:
+    if not trip_input:
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(
-                text="❓ กรุณาใส่รายละเอียดทริปหลังคำสั่ง !trip\n\nตัวอย่าง:\n!trip เชียงใหม่ 3 วัน 10-12 กรกฎาคม นั่งรถทัวร์ พักที่นิมมาน..."
+                text="❓ วิธีใช้: !trip [ชื่อทริป] [รายละเอียด]\n\nตัวอย่าง:\n!trip สมุย ไปพะงันวันที่ 2\n!trip เชียงใหม่ จองโรงแรมแล้ว"
             )
         )
         return
 
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text="✈️ กำลังเตรียมแผนการเดินทางของคุณ...")
+        TextSendMessage(text="📝 กำลังจัดการข้อมูลทริปให้คุณ กรุณารอสักครู่...")
     )
 
     try:
-        content, is_ai = format_trip_with_gemini(trip_text)
-        update_google_doc(content, is_ai)
+        # 1. อ่านข้อมูลเดิมจาก Doc
+        current_content = get_current_doc_content()
+        
+        # 2. ให้ AI ช่วยรวมข้อมูล (หรือ fallback เป็นข้อมูลดิบ)
+        merged_text, is_ai = format_trip_with_gemini(trip_input, current_content)
+        
+        # 3. อัปเดตลง Doc
+        update_google_doc(merged_text)
 
         doc_link = f"https://docs.google.com/document/d/{DOC_ID}/edit"
         
-        success_msg = "✅ แผนการเดินทางอัปเดตแล้ว!"
+        success_msg = "✅ จัดการข้อมูลทริปเรียบร้อยแล้ว!"
         if not is_ai:
-            success_msg += "\n(หมายเหตุ: AI ไม่ว่างชั่วคราว จึงบันทึกเป็นข้อความดิบให้ก่อนครับ)"
+            success_msg += "\n(หมายเหตุ: ใช้โหมดบันทึกข้อมูลดิบชั่วคราว)"
 
         source = event.source
         if hasattr(source, 'group_id'):
@@ -163,7 +187,7 @@ def handle_message(event):
         line_bot_api.push_message(
             target_id,
             TextSendMessage(
-                text=f"{success_msg}\n\n📄 ดูได้ที่นี่:\n{doc_link}"
+                text=f"{success_msg}\n\n📄 ดูแผนการเดินทางทั้งหมดได้ที่นี่:\n{doc_link}"
             )
         )
 
@@ -178,7 +202,7 @@ def handle_message(event):
 
         line_bot_api.push_message(
             target_id,
-            TextSendMessage(text=f"❌ เกิดข้อผิดพลาดทางเทคนิค: {str(e)}")
+            TextSendMessage(text=f"❌ เกิดข้อผิดพลาด: {str(e)}")
         )
 
 
