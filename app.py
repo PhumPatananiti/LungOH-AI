@@ -55,25 +55,22 @@ def format_trip_with_gemini(raw_text):
 ข้อมูลทริป:
 {raw_text}"""
 
-    model_name = "gemini-2.0-flash-lite"
+    # ใช้โมเดลมาตรฐานฟรีในปี 2026
+    model_name = "gemini-3.1-flash-lite"
     try:
         response = gemini_client.models.generate_content(
             model=model_name,
             contents=prompt
         )
-        return response.text
+        return response.text, True  # True means formatted by AI
     except Exception as e:
-        # If it fails, try to list what is actually available for this key
-        try:
-            available = [m.name for m in gemini_client.models.list()]
-            diag = f"\nโมเดลที่ใช้งานได้: {', '.join(available)}"
-        except:
-            diag = ""
-        raise Exception(f"{str(e)}{diag}")
+        # หาก AI ล้มเหลว ให้คืนค่าข้อความดิบกลับไป (Manual Mode)
+        print(f"AI Error: {e}")
+        return raw_text, False  # False means raw text fallback
 
 
-def update_google_doc(formatted_text):
-    """Overwrite the Google Doc with the newly formatted trip plan."""
+def update_google_doc(text, is_ai_formatted):
+    """Overwrite the Google Doc with either formatted or raw text."""
     if not docs_service:
         raise Exception("Google Docs ไม่ได้รับการตั้งค่าอย่างถูกต้อง")
 
@@ -90,7 +87,9 @@ def update_google_doc(formatted_text):
             }
         })
 
-    full_text = f"แผนการเดินทาง (อัปเดตล่าสุดผ่าน LINE)\n{'='*40}\n\n{formatted_text}"
+    status_tag = "(จัดรูปแบบโดย AI)" if is_ai_formatted else "(บันทึกข้อมูลดิบ - AI ไม่ว่าง)"
+    full_text = f"แผนการเดินทาง {status_tag}\n{'='*40}\n\n{text}"
+    
     requests.append({
         'insertText': {
             'location': {'index': 1},
@@ -140,14 +139,18 @@ def handle_message(event):
 
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text="✈️ กำลังจัดรูปแบบแผนการเดินทาง กรุณารอสักครู่...")
+        TextSendMessage(text="✈️ กำลังเตรียมแผนการเดินทางของคุณ...")
     )
 
     try:
-        formatted = format_trip_with_gemini(trip_text)
-        update_google_doc(formatted)
+        content, is_ai = format_trip_with_gemini(trip_text)
+        update_google_doc(content, is_ai)
 
         doc_link = f"https://docs.google.com/document/d/{DOC_ID}/edit"
+        
+        success_msg = "✅ แผนการเดินทางอัปเดตแล้ว!"
+        if not is_ai:
+            success_msg += "\n(หมายเหตุ: AI ไม่ว่างชั่วคราว จึงบันทึกเป็นข้อความดิบให้ก่อนครับ)"
 
         source = event.source
         if hasattr(source, 'group_id'):
@@ -160,7 +163,7 @@ def handle_message(event):
         line_bot_api.push_message(
             target_id,
             TextSendMessage(
-                text=f"✅ แผนการเดินทางของคุณพร้อมแล้ว!\n\n📄 ดูได้ที่นี่:\n{doc_link}\n\n(ส่ง !trip มาใหม่ได้ตลอดเวลาเพื่ออัปเดต)"
+                text=f"{success_msg}\n\n📄 ดูได้ที่นี่:\n{doc_link}"
             )
         )
 
@@ -175,7 +178,7 @@ def handle_message(event):
 
         line_bot_api.push_message(
             target_id,
-            TextSendMessage(text=f"❌ เกิดข้อผิดพลาดบางอย่าง กรุณาลองใหม่อีกครั้ง\n\nรายละเอียด: {str(e)}")
+            TextSendMessage(text=f"❌ เกิดข้อผิดพลาดทางเทคนิค: {str(e)}")
         )
 
 
