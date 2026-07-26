@@ -155,55 +155,40 @@ def handle_message(event):
         )
         return
 
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text="📝 กำลังจัดการข้อมูลทริปให้คุณ กรุณารอสักครู่...")
-    )
-
+    # Do the work first, then spend the single reply token on the result.
+    # reply_message is free and unlimited; push_message bills against the
+    # monthly quota, so we never push.
     try:
         # 1. อ่านข้อมูลเดิมจาก Doc
         current_content = get_current_doc_content()
-        
+
         # 2. ให้ AI ช่วยรวมข้อมูล (หรือ fallback เป็นข้อมูลดิบ)
         merged_text, is_ai = format_trip_with_gemini(trip_input, current_content)
-        
+
         # 3. อัปเดตลง Doc
         update_google_doc(merged_text)
 
         doc_link = f"https://docs.google.com/document/d/{DOC_ID}/edit"
-        
+
         success_msg = "✅ จัดการข้อมูลทริปเรียบร้อยแล้ว!"
         if not is_ai:
             success_msg += "\n(หมายเหตุ: ใช้โหมดบันทึกข้อมูลดิบชั่วคราว)"
 
-        source = event.source
-        if hasattr(source, 'group_id'):
-            target_id = source.group_id
-        elif hasattr(source, 'room_id'):
-            target_id = source.room_id
-        else:
-            target_id = source.user_id
-
-        line_bot_api.push_message(
-            target_id,
-            TextSendMessage(
-                text=f"{success_msg}\n\n📄 ดูแผนการเดินทางทั้งหมดได้ที่นี่:\n{doc_link}"
-            )
-        )
+        reply_text = f"{success_msg}\n\n📄 ดูแผนการเดินทางทั้งหมดได้ที่นี่:\n{doc_link}"
 
     except Exception as e:
-        source = event.source
-        if hasattr(source, 'group_id'):
-            target_id = source.group_id
-        elif hasattr(source, 'room_id'):
-            target_id = source.room_id
-        else:
-            target_id = source.user_id
+        print(f"Trip update failed: {e}")
+        reply_text = f"❌ เกิดข้อผิดพลาด: {str(e)}"
 
-        line_bot_api.push_message(
-            target_id,
-            TextSendMessage(text=f"❌ เกิดข้อผิดพลาด: {str(e)}")
+    try:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_text)
         )
+    except Exception as e:
+        # Reply tokens expire (~1 min). If we were too slow the message is lost,
+        # but the doc was still updated — log it instead of falling back to push.
+        print(f"Reply failed (token likely expired): {e}")
 
 
 if __name__ == "__main__":
