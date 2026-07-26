@@ -22,6 +22,6 @@ Sending `!trip` again updates the same doc.
 ## Stack
 - Flask (Python web server)
 - LINE Messaging API
-- Google Gemini 1.5 Flash (free)
+- Google Gemini 3.1 Flash-Lite
 - Google Docs API
 - Hosted on Render (free tier)
