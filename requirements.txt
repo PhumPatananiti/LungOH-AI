@@ -1,6 +1,6 @@
 flask==3.0.3
 line-bot-sdk==3.12.0
 google-genai==2.14.0
-google-auth==2.30.0
+google-auth==2.56.2
 google-api-python-client==2.134.0
 gunicorn==22.0.0
